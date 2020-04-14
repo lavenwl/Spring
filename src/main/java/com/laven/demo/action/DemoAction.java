@@ -1,10 +1,10 @@
 package com.laven.demo.action;
 
 import com.laven.demo.service.IDemoService;
-import com.laven.spring.annotation.Autowired;
-import com.laven.spring.annotation.Controller;
-import com.laven.spring.annotation.RequestMapping;
-import com.laven.spring.annotation.RequestParam;
+import com.laven.spring2.annotation.Autowired;
+import com.laven.spring2.annotation.Controller;
+import com.laven.spring2.annotation.RequestMapping;
+import com.laven.spring2.annotation.RequestParam;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;

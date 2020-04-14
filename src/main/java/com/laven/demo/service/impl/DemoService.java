@@ -1,7 +1,7 @@
 package com.laven.demo.service.impl;
 
 import com.laven.demo.service.IDemoService;
-import com.laven.spring.annotation.Service;
+import com.laven.spring2.annotation.Service;
 
 @Service
 public class DemoService implements IDemoService {
