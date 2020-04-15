@@ -16,19 +16,21 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class DispatchServlet extends HttpServlet {
     // 应用执行上下文, 相当于Spring IOC容器的工厂类
     private ApplicationContext applicationContext;
 
-    // 全局配置文件, 用来存储配置信息
-    private Properties contextConfig = new Properties();
-
-    // 所有需要控制的类"名"的集合
-    private List<String> classNames = new ArrayList<String>();
-
     // 请求url与方法的映射集合
-    private Map<String, Method> handlerMapping = new HashMap<String, Method>();
+    private List<HandlerMapping> handlerMappings = new ArrayList<HandlerMapping>();
+
+    // 参数适配器集合
+    private Map<HandlerMapping, HandlerAdapter> handlerAdapters = new HashMap<HandlerMapping, HandlerAdapter>();
+
+    // 视图解析器
+    private List<ViewResolver> viewResolvers = new ArrayList<ViewResolver>();
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
@@ -41,53 +43,59 @@ public class DispatchServlet extends HttpServlet {
         try {
             doDispatch(req, resp);
         } catch (Exception e) {
-            e.printStackTrace();
-            resp.getWriter().write("500 Exception, Detail: " + Arrays.toString(e.getStackTrace()));
+            try {
+                processDispatcherResult(req, resp, new ModelAndView("500"));
+            } catch (Exception ex) {
+                ex.printStackTrace();
+                resp.getWriter().write("500 Exception, Detail: " + Arrays.toString(e.getStackTrace()));
+            }
+        }
+    }
+
+    private void processDispatcherResult(HttpServletRequest req, HttpServletResponse resp, ModelAndView modelAndView) throws Exception {
+        if (null == modelAndView) {return;}
+        if (this.viewResolvers.isEmpty()) {return;}
+
+        for (ViewResolver viewResolver : this.viewResolvers) {
+            View view = viewResolver.resolveViewName(modelAndView.getViewName());
+            // 直接往浏览器输出
+            view.render(modelAndView.getModel(), req, resp);
+            return;
         }
     }
 
     private void doDispatch(HttpServletRequest req, HttpServletResponse resp) throws Exception {
+        // 1. 通过URL获取一个HandlerMapping
+        HandlerMapping handlerMapping = getHandler(req);
+        if (handlerMapping == null) {
+            processDispatcherResult(req, resp, new ModelAndView("404"));
+            return;
+        }
+        // 2. 根据一个HandlerMapping获取一个HandlerAdaptor
+        HandlerAdapter handlerAdapter = getHandlerAdapter(handlerMapping);
+        // 3. 解析某一个方法的形参和返回值之后, 统一封装为ModelAndView对象
+        ModelAndView modelAndView = handlerAdapter.handler(req, resp, handlerMapping);
+        // 4. 把ModelAndView变成一个ViewResolver
+        processDispatcherResult(req, resp, modelAndView);
+    }
+
+    private HandlerAdapter getHandlerAdapter(HandlerMapping handlerMapping) {
+        if (this.handlerAdapters.isEmpty()) { return null; }
+        return this.handlerAdapters.get(handlerMapping);
+    }
+
+    private HandlerMapping getHandler(HttpServletRequest req) {
+        if (this.handlerMappings.isEmpty()) { return null; }
         String url = req.getRequestURI();
         String contextPath = req.getContextPath();
         url = url.replaceAll(contextPath, "").replaceAll("/+", "/");
 
-        if(!this.handlerMapping.containsKey(url)) {
-            resp.getWriter().write("404 not Found Mehod!");
-            return;
+        for (HandlerMapping handlerMapping : handlerMappings) {
+            Matcher matcher = handlerMapping.getPattern().matcher(url);
+            if (!matcher.matches()) { continue; }
+            return handlerMapping;
         }
-
-        Map<String, String[]> params = req.getParameterMap();
-        Method method = this.handlerMapping.get(url);
-
-        // 获取形参列表
-        Class<?> [] parameterTypes = method.getParameterTypes();
-        Object [] paramValues = new Object[parameterTypes.length];
-
-        for (int i = 0; i < parameterTypes.length; i++) {
-            Class parameterType = parameterTypes[i];
-            if(parameterType == HttpServletRequest.class) {
-                paramValues[i] = req;
-            } else if (parameterType == HttpServletResponse.class) {
-                paramValues[i] = resp;
-            } else if (parameterType == String.class) {
-                // 同过运行时的状态去拿
-                Annotation[] [] pa = method.getParameterAnnotations();
-                for (int j = 0; j < pa.length; j++) {
-                    for (Annotation a : pa[i]) {
-                        if(!(a instanceof RequestParam)) {continue;}
-                        String paramName = ((RequestParam) a).value();
-                        if("".equals(paramName.trim())) {continue;}
-                        String value = Arrays.toString(params.get(paramName))
-                                .replaceAll("\\[|\\]", "")
-                                .replaceAll("\\s+", ",");
-                        paramValues[i] = value;
-                    }
-                }
-            }
-        }
-        // 获取类属性对应的实例
-        String beanName = toLowerFirstCase(method.getDeclaringClass().getSimpleName());
-        method.invoke(applicationContext.getBean(beanName), paramValues);
+        return null;
     }
 
     @Override
@@ -95,20 +103,44 @@ public class DispatchServlet extends HttpServlet {
         // 初始化Spring核心IOC容器
         applicationContext = new ApplicationContext(config.getInitParameter("contextConfigLocation"));
 
-
-
-        // 初始化HandlerMapping
-        doHandlerMapping();
+        // 初始化九大组件
+        initStrategies(applicationContext);
 
         System.out.println("手写Spring初始化完成");
     }
 
-    private void doHandlerMapping() {
+    private void initStrategies(ApplicationContext context) {
+        // 多文件上传的组件
+//        initMultipartResolver(context);
+        // 初始化本地语言环境
+//        initLocaleResolver(context);
+        // 初始化模板处理器
+//        initThemeResolver(context);
+        // 初始化请求分发处理器
+        initHandlerMappings(context);
+        // 初始化参数适配器
+        initHandlerAdapter(context);
+        // 初始化异常拦截器
+//        initHandlerExceptionResolvers(context);
+        // 初始化视图预处理器
+//        initRequestToViewNameTranslator(context);
+        // 初始化视图转换器
+        initViewResolvers(context);
+        // 初始化FlashMap管理器
+//        initFlashMapManager(context);
+    }
+
+    private void initHandlerAdapter(ApplicationContext context) {
+        for (HandlerMapping handlerMapping : handlerMappings) {
+            this.handlerAdapters.put(handlerMapping, new HandlerAdapter());
+        }
+    }
+
+    private void initHandlerMappings(ApplicationContext context) {
         if(this.applicationContext.getBeanDefinitionCount() == 0) {return;}
         for (String beanName : this.applicationContext.getBeanDefinitionNames()) {
             Object instance = applicationContext.getBean(beanName);
             Class<?> clazz = instance.getClass();
-
 
             if(!clazz.isAnnotationPresent(Controller.class)) {continue;}
 
@@ -124,11 +156,24 @@ public class DispatchServlet extends HttpServlet {
                 if(!method.isAnnotationPresent(RequestMapping.class)) {continue;}
                 // 提取方法上配置的url
                 RequestMapping requestMapping = method.getAnnotation(RequestMapping.class);
-                String url = ("/" + baseUrl + "/" + requestMapping.value()).replaceAll("/+", "/");
-                handlerMapping.put(url, method);
+//                String url = ("/" + baseUrl + "/" + requestMapping.value()).replaceAll("/+", "/");
+                String regex = ("/" + baseUrl + "/" + requestMapping.value().replaceAll("\\*",".*")).replaceAll("/+","/");
+                Pattern pattern = Pattern.compile(regex);
+                handlerMappings.add(new HandlerMapping(pattern, method, instance));
 
-                System.out.println("添加映射方法: " + url + " " + method);
+                System.out.println("添加映射方法: " + regex + " " + method);
             }
+        }
+    }
+
+    private void initViewResolvers(ApplicationContext context) {
+        String templateRoot = context.getConfig().getProperty("templateRoot");
+        String templateRootPath = this.getClass().getClassLoader().getResource(templateRoot).getFile();
+
+        // 每一个页面设置一个页面解析器, 并缓存到viewResolvers对象里面.
+        File templateRootDir = new File(templateRootPath);
+        for (File file : templateRootDir.listFiles()) {
+            this.viewResolvers.add(new ViewResolver(templateRoot));
         }
     }
 
@@ -138,38 +183,4 @@ public class DispatchServlet extends HttpServlet {
         return String.valueOf(chars);
     }
 
-    private void doScanner(String scanPackage) {
-        // ?? 了解URL对象
-        URL url = this.getClass().getClassLoader().getResource("/" + scanPackage.replaceAll("\\.", "/"));
-        File classPath = new File(url.getFile());
-
-        for (File file : classPath.listFiles()) {
-            if (file.isDirectory()) {
-                // ?? 为什么 "." 与 "/" 切换
-                doScanner(scanPackage + "." + file.getName());
-            } else {
-                if(!file.getName().endsWith(".class")) { continue; }
-                // 全类名 = 包名 + . + 类名
-                String className = (scanPackage + "." + file.getName().replace(".class", ""));
-                classNames.add(className);
-            }
-        }
-    }
-
-    private void doLoadConfig(String contextConfigLocation) {
-        InputStream is = this.getClass().getClassLoader().getResourceAsStream(contextConfigLocation);
-        try {
-            contextConfig.load(is);
-        } catch (IOException e) {
-            e.printStackTrace();
-        } finally {
-            if(null != is) {
-                try {
-                    is.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
-        }
-    }
 }
