@@ -27,4 +27,8 @@ public class QueryService implements IQueryService {
 		return json;
 	}
 
+	@Override
+	public String toString() {
+		return "QueryService{}";
+	}
 }

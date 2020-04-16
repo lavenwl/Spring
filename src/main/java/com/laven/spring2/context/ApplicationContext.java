@@ -3,6 +3,9 @@ package com.laven.spring2.context;
 import com.laven.spring2.annotation.Controller;
 import com.laven.spring2.annotation.Autowired;
 import com.laven.spring2.annotation.Service;
+import com.laven.spring2.aop.JdkDynamicAopProxy;
+import com.laven.spring2.aop.config.AopConfig;
+import com.laven.spring2.aop.support.AdvisedSupport;
 import com.laven.spring2.beans.BeanWrapper;
 import com.laven.spring2.beans.config.BeanDefinition;
 import com.laven.spring2.beans.support.BeanDefinitionReader;
@@ -116,11 +119,35 @@ public class ApplicationContext {
         try{
             Class<?> clazz = Class.forName(className);
             instance = clazz.newInstance();
+
+            // =================== AOP 开始 ================= //
+            // 1. 加载AOP的配置文件
+            AdvisedSupport config = instantionAopConfig(beanDefinition);
+            config.setTargetClass(clazz);
+            config.setTarget(instance);
+            // 2. 判断规则, 需不需要生成代理类, 如果需要, 则覆盖原生类,
+            //    如果不需要, 则不作任何处理, 返回原生对象.
+            if (config.pointCutMatch()) {
+                instance = new JdkDynamicAopProxy(config).getProxy();
+            }
+            // =================== AOP 结束 ================= //
+
             this.factoryBeanObjectCache.put(beanName, instance);
         } catch (Exception e) {
             e.printStackTrace();
         }
         return instance;
+    }
+
+    private AdvisedSupport instantionAopConfig(BeanDefinition beanDefinition) {
+        AopConfig config = new AopConfig();
+        config.setPointCut(this.reader.getConfig().getProperty("pointCut"));
+        config.setAspectClass(this.reader.getConfig().getProperty("aspectClass"));
+        config.setAspectBefore(this.reader.getConfig().getProperty("aspectBefore"));
+        config.setAspectAfter(this.reader.getConfig().getProperty("aspectAfter"));
+        config.setAspectAfterThrow(this.reader.getConfig().getProperty("aspectAfterThrow"));
+        config.setAspectAfterThrowingName(this.reader.getConfig().getProperty("aspectAfterThrowingName"));
+        return new AdvisedSupport(config);
     }
 
 

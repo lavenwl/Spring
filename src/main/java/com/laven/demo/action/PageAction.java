@@ -27,4 +27,10 @@ public class PageAction {
         return new ModelAndView("first.html", model);
     }
 
+    @Override
+    public String toString() {
+        return "PageAction{" +
+                "queryService=" + queryService +
+                '}';
+    }
 }

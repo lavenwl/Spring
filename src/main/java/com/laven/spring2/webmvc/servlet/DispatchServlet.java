@@ -47,7 +47,7 @@ public class DispatchServlet extends HttpServlet {
                 processDispatcherResult(req, resp, new ModelAndView("500"));
             } catch (Exception ex) {
                 ex.printStackTrace();
-                resp.getWriter().write("500 Exception, Detail: " + Arrays.toString(e.getStackTrace()));
+                resp.getWriter().write("500 Exception,Detail : " + Arrays.toString(e.getStackTrace()));
             }
         }
     }
