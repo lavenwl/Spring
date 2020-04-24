@@ -3,12 +3,14 @@ package com.laven.spring2.context;
 import com.laven.spring2.annotation.Controller;
 import com.laven.spring2.annotation.Autowired;
 import com.laven.spring2.annotation.Service;
+import com.laven.spring2.aop.DefaultAopProxyFactory;
 import com.laven.spring2.aop.JdkDynamicAopProxy;
 import com.laven.spring2.aop.config.AopConfig;
 import com.laven.spring2.aop.support.AdvisedSupport;
 import com.laven.spring2.beans.BeanWrapper;
 import com.laven.spring2.beans.config.BeanDefinition;
 import com.laven.spring2.beans.support.BeanDefinitionReader;
+import com.laven.spring2.core.BeanFactory;
 
 import java.lang.reflect.Field;
 import java.util.HashMap;
@@ -19,7 +21,7 @@ import java.util.Properties;
 /**
  * 职责: 完成Bean的创建, 和DI
  */
-public class ApplicationContext {
+public class ApplicationContext implements BeanFactory {
     // 读取配置文件, 扫描配置的包内所有的类, 并返回包装好的BeanDefinition
     private BeanDefinitionReader reader;
     // 以工厂方法获取实例的简单名字为KEY, 以改类的定义类为VALUE, 缓存对象
@@ -29,6 +31,7 @@ public class ApplicationContext {
 
     private Map<String, Object> factoryBeanObjectCache = new HashMap<String, Object>();
 
+    private DefaultAopProxyFactory proxyFactory = new DefaultAopProxyFactory();
 
     public ApplicationContext(String... configLocations) {
         try {
@@ -53,6 +56,10 @@ public class ApplicationContext {
             String beanName = beanDefinitionEntry.getKey();
             getBean(beanName);
         }
+    }
+
+    public Object getBean(Class beanClass) {
+        return this.getBean(beanClass.getName());
     }
 
     // Bean 的实例化, DI是从这个方法开始的
@@ -117,22 +124,26 @@ public class ApplicationContext {
         String className = beanDefinition.getBeanClassName();
         Object instance = null;
         try{
-            Class<?> clazz = Class.forName(className);
-            instance = clazz.newInstance();
+            if (this.factoryBeanObjectCache.containsKey(beanName)) {
+                instance = this.factoryBeanObjectCache.get(beanName);
+            } else {
+                Class<?> clazz = Class.forName(className);
+                instance = clazz.newInstance();
 
-            // =================== AOP 开始 ================= //
-            // 1. 加载AOP的配置文件
-            AdvisedSupport config = instantionAopConfig(beanDefinition);
-            config.setTargetClass(clazz);
-            config.setTarget(instance);
-            // 2. 判断规则, 需不需要生成代理类, 如果需要, 则覆盖原生类,
-            //    如果不需要, 则不作任何处理, 返回原生对象.
-            if (config.pointCutMatch()) {
-                instance = new JdkDynamicAopProxy(config).getProxy();
+                // =================== AOP 开始 ================= //
+                // 1. 加载AOP的配置文件
+                AdvisedSupport config = instantionAopConfig(beanDefinition);
+                config.setTargetClass(clazz);
+                config.setTarget(instance);
+                // 2. 判断规则, 需不需要生成代理类, 如果需要, 则覆盖原生类,
+                //    如果不需要, 则不作任何处理, 返回原生对象.
+                if (config.pointCutMatch()) {
+                    instance = proxyFactory.createAopProxy(config).getProxy();
+                }
+                // =================== AOP 结束 ================= //
+
+                this.factoryBeanObjectCache.put(beanName, instance);
             }
-            // =================== AOP 结束 ================= //
-
-            this.factoryBeanObjectCache.put(beanName, instance);
         } catch (Exception e) {
             e.printStackTrace();
         }
